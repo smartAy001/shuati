@@ -207,7 +207,10 @@ def list_sets():
     conn = database.get_conn()
     try:
         rows = conn.execute(
-            "SELECT s.*, (SELECT COUNT(*) FROM question q WHERE q.set_id = s.id) AS qcount "
+            "SELECT s.*, "
+            "(SELECT COUNT(*) FROM question q WHERE q.set_id = s.id) AS qcount, "
+            "(SELECT id FROM practice_session ps WHERE ps.set_id = s.id AND ps.status='in_progress' "
+            " AND ps.session_type='practice' ORDER BY ps.id DESC LIMIT 1) AS unfinished_id "
             "FROM question_set s ORDER BY s.id DESC"
         ).fetchall()
     finally:
@@ -222,6 +225,7 @@ def list_sets():
             "source_type": r["source_type"],
             "created_at": r["created_at"],
             "question_count": r["qcount"],
+            "unfinished_id": r["unfinished_id"],
         }
         for r in rows
     ]

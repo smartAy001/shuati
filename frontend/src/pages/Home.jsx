@@ -3,11 +3,13 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import Modal from '../components/Modal'
 
-const MODES = [
-  { key: 'order', label: '顺序练习', desc: '按题目顺序作答' },
-  { key: 'random', label: '随机打乱', desc: '随机排序作答' },
-  { key: 'wrong', label: '错题重做', desc: '只做做过的错题' },
+const ORDER_MODES = [
+  { key: 'order', label: '顺序', desc: '按题目顺序' },
+  { key: 'random', label: '随机', desc: '随机抽取' },
+  { key: 'wrong', label: '错题', desc: '只做历史错题' },
 ]
+
+const COUNT_OPTS = [10, 20, 30, 50]
 
 export default function Home() {
   const [sets, setSets] = useState([])
@@ -15,6 +17,10 @@ export default function Home() {
   const [error, setError] = useState('')
   const [picker, setPicker] = useState(null)
   const [starting, setStarting] = useState(false)
+  // 弹窗内的临时选项
+  const [optType, setOptType] = useState('exam')
+  const [optMode, setOptMode] = useState('order')
+  const [optCount, setOptCount] = useState(0) // 0 = 全部
   const navigate = useNavigate()
 
   const load = () => {
@@ -27,10 +33,18 @@ export default function Home() {
   }
   useEffect(load, [])
 
-  const start = async (mode) => {
+  const openPicker = (s) => {
+    setOptType('exam')
+    setOptMode('order')
+    setOptCount(0)
+    setPicker(s)
+  }
+
+  const start = async () => {
     setStarting(true)
     try {
-      const s = await api.createSession(picker.id, mode)
+      const count = optCount > 0 ? optCount : null
+      const s = await api.createSession(picker.id, optMode, optType, count)
       navigate(`/practice/${s.id}`)
     } catch (e) {
       alert(e.message)
@@ -88,13 +102,21 @@ export default function Home() {
               <div className="text-sm text-slate-500 mt-1">
                 {s.question_count} 题 · {s.source_type || '未知来源'} · {s.created_at}
               </div>
-              <div className="flex gap-2 mt-4 text-sm">
+              <div className="flex flex-wrap gap-2 mt-4 text-sm">
                 <button
-                  onClick={() => setPicker(s)}
+                  onClick={() => openPicker(s)}
                   className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700"
                 >
                   开始刷题
                 </button>
+                {s.unfinished_id && (
+                  <button
+                    onClick={() => navigate(`/practice/${s.unfinished_id}`)}
+                    className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700"
+                  >
+                    继续练习
+                  </button>
+                )}
                 <Link
                   to={`/edit/${s.id}`}
                   className="border border-slate-300 px-3 py-1.5 rounded-lg hover:bg-slate-50"
@@ -117,18 +139,103 @@ export default function Home() {
         <Modal onClose={() => setPicker(null)}>
           <h3 className="font-semibold text-lg mb-1">开始刷题</h3>
           <p className="text-sm text-slate-500 mb-4 truncate">{picker.title}</p>
-          <div className="space-y-2">
-            {MODES.map((m) => (
-              <button
-                key={m.key}
-                disabled={starting}
-                onClick={() => start(m.key)}
-                className="w-full text-left border border-slate-200 rounded-lg px-3 py-2.5 hover:border-indigo-400 hover:bg-indigo-50 disabled:opacity-50"
-              >
-                <div className="font-medium">{m.label}</div>
-                <div className="text-xs text-slate-500">{m.desc}</div>
-              </button>
-            ))}
+
+          <div className="space-y-4">
+            {/* 模式 */}
+            <div>
+              <div className="text-sm font-medium mb-2">刷题模式</div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setOptType('exam')}
+                  className={`text-left border rounded-lg px-3 py-2.5 ${
+                    optType === 'exam'
+                      ? 'border-indigo-500 bg-indigo-50'
+                      : 'border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="font-medium text-sm">模拟考试</div>
+                  <div className="text-xs text-slate-500 mt-1">全部答完交卷后才显示解析</div>
+                </button>
+                <button
+                  onClick={() => setOptType('practice')}
+                  className={`text-left border rounded-lg px-3 py-2.5 ${
+                    optType === 'practice'
+                      ? 'border-indigo-500 bg-indigo-50'
+                      : 'border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="font-medium text-sm">练习模式</div>
+                  <div className="text-xs text-slate-500 mt-1">答一题即看解析，可断点续答</div>
+                </button>
+              </div>
+            </div>
+
+            {/* 题量 */}
+            <div>
+              <div className="text-sm font-medium mb-2">题目数量</div>
+              <div className="flex flex-wrap items-center gap-2">
+                {COUNT_OPTS.map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => setOptCount(n)}
+                    className={`px-3 py-1.5 rounded-lg border text-sm ${
+                      optCount === n
+                        ? 'border-indigo-500 bg-indigo-50 text-indigo-600'
+                        : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    {n} 题
+                  </button>
+                ))}
+                <button
+                  onClick={() => setOptCount(0)}
+                  className={`px-3 py-1.5 rounded-lg border text-sm ${
+                    optCount === 0
+                      ? 'border-indigo-500 bg-indigo-50 text-indigo-600'
+                      : 'border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  全部（{picker.question_count}）
+                </button>
+                <input
+                  type="number"
+                  min="1"
+                  max={picker.question_count}
+                  value={optCount || ''}
+                  placeholder="自定义"
+                  onChange={(e) => setOptCount(Math.max(0, Number(e.target.value)))}
+                  className="w-20 border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
+                />
+              </div>
+            </div>
+
+            {/* 顺序 */}
+            <div>
+              <div className="text-sm font-medium mb-2">题目顺序</div>
+              <div className="flex gap-2">
+                {ORDER_MODES.map((m) => (
+                  <button
+                    key={m.key}
+                    onClick={() => setOptMode(m.key)}
+                    className={`px-3 py-1.5 rounded-lg border text-sm ${
+                      optMode === m.key
+                        ? 'border-indigo-500 bg-indigo-50 text-indigo-600'
+                        : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button
+              onClick={start}
+              disabled={starting}
+              className="w-full bg-indigo-600 text-white py-2.5 rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {starting ? '创建中…' : `开始${optType === 'practice' ? '练习' : '考试'}（${optCount > 0 ? optCount : picker.question_count} 题）`}
+            </button>
           </div>
         </Modal>
       )}

@@ -42,8 +42,9 @@ def _result_payload(conn, sess):
     questions = [qmap[qid] for qid in qids if qid in qmap]
 
     submitted = sess["status"] == "submitted"
-    if not submitted:
-        # 刷题中隐藏答案与解析，防止直接看到
+    is_practice = (sess["session_type"] or "exam") == "practice"
+    if not submitted and not is_practice:
+        # 考试模式未交卷时隐藏答案与解析；练习模式即时反馈，不隐藏
         for q in questions:
             q["answer"] = ""
             q["explanation"] = ""
@@ -54,6 +55,7 @@ def _result_payload(conn, sess):
         "title": srow["title"] if srow else "",
         "has_answers": bool(srow["has_answers"]) if srow else False,
         "mode": sess["mode"],
+        "session_type": sess["session_type"] or "exam",
         "status": sess["status"],
         "answers": json.loads(sess["answers"] or "{}"),
         "results": json.loads(sess["results"] or "{}"),
@@ -66,7 +68,12 @@ def _result_payload(conn, sess):
 
 
 @router.post("")
-def create_session(set_id: int, mode: str = "order"):
+def create_session(
+    set_id: int,
+    mode: str = "order",
+    session_type: str = "exam",
+    count: int | None = None,
+):
     conn = database.get_conn()
     try:
         srow = conn.execute("SELECT * FROM question_set WHERE id=?", (set_id,)).fetchone()
@@ -95,11 +102,18 @@ def create_session(set_id: int, mode: str = "order"):
             if wrong:
                 qids = [q for q in qids if q in wrong]
 
+        # 题目数量限制：随机/错题已排序或筛选，直接取前 count 个
+        if count and count > 0 and count < len(qids):
+            qids = qids[:count]
+
+        if session_type not in ("practice", "exam"):
+            session_type = "exam"
+
         now = time.strftime("%Y-%m-%d %H:%M:%S")
         cur = conn.execute(
-            "INSERT INTO practice_session(set_id, mode, status, question_order, answers, scores, results, created_at) "
-            "VALUES(?,?,?,?,?,?,?,?)",
-            (set_id, mode, "in_progress", json.dumps(qids), "{}", "{}", "{}", now),
+            "INSERT INTO practice_session(set_id, mode, session_type, status, question_order, answers, scores, results, created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
+            (set_id, mode, session_type, "in_progress", json.dumps(qids), "{}", "{}", "{}", now),
         )
         sid = cur.lastrowid
         conn.commit()

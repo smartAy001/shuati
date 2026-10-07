@@ -55,3 +55,9 @@ def get_conn() -> sqlite3.Connection:
 def init_db() -> None:
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        # 旧库迁移：为已存在的 practice_session 表补充新增列
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(practice_session)")}
+        if "session_type" not in cols:
+            conn.execute(
+                "ALTER TABLE practice_session ADD COLUMN session_type TEXT DEFAULT 'exam'"
+            )

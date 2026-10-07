@@ -31,7 +31,11 @@ export const api = {
   upload: (form) => req('/sets/upload', { method: 'POST', body: form }),
 
   // 会话
-  createSession: (setId, mode) => req(`/sessions?set_id=${setId}&mode=${mode}`, { method: 'POST' }),
+  createSession: (setId, mode, sessionType = 'exam', count) => {
+    let url = `/sessions?set_id=${setId}&mode=${mode}&session_type=${sessionType}`
+    if (count) url += `&count=${count}`
+    return req(url, { method: 'POST' })
+  },
   getSession: (id) => req(`/sessions/${id}`),
   saveAnswer: (sid, questionId, answer) =>
     json('PUT')(`/sessions/${sid}/answer`, { question_id: questionId, answer }),

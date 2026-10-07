@@ -28,6 +28,7 @@ export default function Practice() {
 
   const questions = session.questions
   const q = questions[idx]
+  const isPractice = session.session_type === 'practice'
 
   const setAnswer = (qid, val) => {
     setAnswers((a) => ({ ...a, [qid]: val }))
@@ -37,18 +38,26 @@ export default function Practice() {
     }, 400)
   }
 
+  // 切题前立即保存当前题，保证练习模式断点续答不丢答案
+  const flushCurrent = () => {
+    const cur = questions[idx]
+    clearTimeout(timers.current[cur.id])
+    api.saveAnswer(sessionId, cur.id, answers[cur.id] || '').catch(() => {})
+  }
+  const goTo = (i) => {
+    flushCurrent()
+    setIdx(i)
+  }
+
   const submit = async () => {
     const unanswered = questions.filter((qq) => !(answers[qq.id] || '').trim()).length
-    if (unanswered > 0 && !window.confirm(`还有 ${unanswered} 题未作答，确定交卷？`)) return
-    // 交卷前先保存当前题，避免防抖尚未触发的答案丢失
+    if (!isPractice && unanswered > 0 && !window.confirm(`还有 ${unanswered} 题未作答，确定交卷？`)) return
+    // 交卷前先保存所有已答题目，避免防抖尚未触发的答案丢失
     Object.values(timers.current).forEach(clearTimeout)
     timers.current = {}
-    const cur = questions[idx]
-    try {
-      await api.saveAnswer(sessionId, cur.id, answers[cur.id] || '')
-    } catch {
-      /* 忽略保存失败 */
-    }
+    await Promise.all(
+      questions.map((qq) => api.saveAnswer(sessionId, qq.id, answers[qq.id] || '').catch(() => {}))
+    )
     setSubmitting(true)
     setError('')
     try {
@@ -65,7 +74,11 @@ export default function Practice() {
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-lg font-semibold">{session.title}</h1>
         <span className="text-sm text-slate-500">
-          {session.has_answers ? '自带答案' : '交卷后 DeepSeek 生成解析'}
+          {isPractice
+            ? '练习模式 · 答一题即看解析，可随时结束'
+            : session.has_answers
+              ? '自带答案'
+              : '交卷后 DeepSeek 生成解析'}
         </span>
       </div>
 
@@ -78,10 +91,14 @@ export default function Practice() {
 
           <AnswerInput q={q} value={answers[q.id] || ''} onChange={(v) => setAnswer(q.id, v)} />
 
+          {isPractice && (answers[q.id] || '').trim() && (
+            <PracticeFeedback q={q} userAnswer={answers[q.id] || ''} />
+          )}
+
           <div className="flex justify-between mt-8">
             <button
               disabled={idx === 0}
-              onClick={() => setIdx(idx - 1)}
+              onClick={() => goTo(idx - 1)}
               className="border border-slate-300 px-4 py-2 rounded-lg hover:bg-slate-50 disabled:opacity-40"
             >
               上一题
@@ -90,11 +107,11 @@ export default function Practice() {
               onClick={submit}
               className="bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700"
             >
-              交卷
+              {isPractice ? '完成练习' : '交卷'}
             </button>
             <button
               disabled={idx === questions.length - 1}
-              onClick={() => setIdx(idx + 1)}
+              onClick={() => goTo(idx + 1)}
               className="border border-slate-300 px-4 py-2 rounded-lg hover:bg-slate-50 disabled:opacity-40"
             >
               下一题
@@ -102,7 +119,7 @@ export default function Practice() {
           </div>
         </div>
 
-        <AnswerCard questions={questions} answers={answers} idx={idx} onJump={setIdx} />
+        <AnswerCard questions={questions} answers={answers} idx={idx} onJump={goTo} />
       </div>
 
       {submitting && (
@@ -259,6 +276,67 @@ function AnswerCard({ questions, answers, idx, onJump }) {
       <div className="text-xs text-slate-500 mt-3">
         已答 {answeredCount} / {questions.length}
       </div>
+    </div>
+  )
+}
+
+const JUDGE_TRUE = new Set(['对', '√', '正确', 'T', 't', '是'])
+const JUDGE_FALSE = new Set(['错', '×', '错误', 'F', 'f', '否'])
+
+function normalizeAnswer(ans) {
+  if (!ans) return ''
+  ans = String(ans).trim().replace(/[。.；;]+$/, '')
+  if (!ans) return ''
+  if (JUDGE_TRUE.has(ans)) return '对'
+  if (JUDGE_FALSE.has(ans)) return '错'
+  if (/^[A-Ha-h,，、\s]+$/.test(ans)) {
+    const letters = ans.match(/[A-Ha-h]/g)
+    if (letters) return letters.map((l) => l.toUpperCase()).sort().join('')
+  }
+  return ans
+}
+
+// 客观题即时判分；返回 null 表示无法判断（主观题 / 未作答）
+function isObjectiveCorrect(q, userAnswer) {
+  const ua = (userAnswer || '').trim()
+  if (!ua) return null
+  if (q.type === 'short') return null
+  if (q.type === 'fill') {
+    return ua === (q.answer || '').trim() || normalizeAnswer(ua) === normalizeAnswer(q.answer)
+  }
+  return normalizeAnswer(ua) === normalizeAnswer(q.answer)
+}
+
+function PracticeFeedback({ q, userAnswer }) {
+  const correct = isObjectiveCorrect(q, userAnswer)
+  const wrong = correct === false
+  const right = correct === true
+  return (
+    <div
+      className={`mt-6 rounded-lg border p-4 ${
+        wrong ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50'
+      }`}
+    >
+      <div className={`text-sm font-medium mb-2 ${wrong ? 'text-red-600' : 'text-emerald-700'}`}>
+        {wrong ? '回答错误 ✗' : right ? '回答正确 ✓' : '答案与解析'}
+      </div>
+      <div className="text-sm mb-1">
+        <span className="text-slate-500">你的答案：</span>
+        <b className={wrong ? 'text-red-600' : right ? 'text-emerald-700' : 'text-slate-700'}>
+          {userAnswer}
+        </b>
+      </div>
+      {q.answer ? (
+        <div className="text-sm mb-1">
+          <span className="text-slate-500">正确答案：</span>
+          <b className={wrong ? 'text-red-700' : 'text-emerald-700'}>{q.answer}</b>
+        </div>
+      ) : (
+        <div className="text-sm text-slate-400 mb-1">该题暂无参考答案</div>
+      )}
+      {q.explanation && (
+        <div className="text-sm text-slate-600 whitespace-pre-wrap mt-2">{q.explanation}</div>
+      )}
     </div>
   )
 }
